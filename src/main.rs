@@ -1,8 +1,12 @@
 use std::collections::HashMap;
-use std::io::{stdin, stdout, Error, ErrorKind};
+use std::fs::File;
+use std::io::{stdin, stdout, Error, ErrorKind, Read, Write};
+use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::str::FromStr;
 use std::{env, path};
+use std::io::BufReader;
+use reqwest;
 
 use serde::Deserialize;
 use serde_yaml::{self};
@@ -42,8 +46,8 @@ struct Sample {
     artist: String,
     name: String,
     r#type: String,
-    from: Option<String>,
-    to: Option<String>,
+    // from: Option<String>,
+    // to: Option<String>,
 }
 
 struct Config<'a> {
@@ -51,6 +55,7 @@ struct Config<'a> {
     debug: bool,
     audio_fmt: &'a str,
     force: bool,
+    download_covers: bool,
 }
 
 fn read_file(path: String) -> Album {
@@ -151,6 +156,7 @@ fn set_tags(
     album: &Album,
     track: &Track,
     track_pos_str: &str,
+    cover: Vec<u8>
 ) -> Result<(), Error> {
     let track_name = &track.name;
     let album_name = &album.name;
@@ -163,7 +169,11 @@ fn set_tags(
     let comment = make_comment(track);
     let artist = make_artist(album, track);
 
-    let mut tag = Tag::new();
+    let mut tag = match Tag::read_from_path(path_out) {
+        Ok(tag) => tag,
+        Err(_) => Tag::new(),
+    };
+
     tag.set_album(album_name);
     tag.set_title(track_name);
     tag.set_album_artist(album_artist);
@@ -173,13 +183,21 @@ fn set_tags(
     tag.set_year(year);
     tag.set_artist(artist);
 
-    tag.add_frame(frame::Comment {
-        lang: String::from("EN"),
-        description: String::new(),
-        text: comment,
-    });
-
-
+    if !comment.is_empty() {
+        tag.add_frame(frame::Comment {
+            lang: String::from("EN"),
+            description: String::new(),
+            text: comment,
+        });
+    }
+    if !cover.is_empty() {
+        tag.add_frame(frame::Picture {
+            mime_type: "image/jpeg".to_string(),
+            picture_type: frame::PictureType::Other,
+            description: "cover".to_string(),
+            data: cover,
+        });
+    }
     match lyrics {
         Some(lyrics) => {
             tag.add_frame(frame::Lyrics {
@@ -197,6 +215,35 @@ fn set_tags(
             println!("{}", err);
             Err(Error::new(ErrorKind::Unsupported, "tagging failed"))
         }
+    }
+}
+
+fn write_cover(path: &str, image_bytes: &Vec<u8>) -> Result<(), Error> {
+    let mut file = File::create(path)?;
+    file.write_all(image_bytes)?;
+    Ok(())
+}
+
+fn get_cover(config: &Config, path_cover: &str, album: &Album) -> Vec<u8> {
+    let should_download_cover = !std::path::Path::new(path_cover).exists() || config.force;
+    if should_download_cover {
+        let cover_url = &album.cover;
+        if config.debug { println!("downloading cover") }
+        let resp = reqwest::blocking::get(cover_url);
+
+        match resp {
+            Ok(response) => {
+                let bytes = response.bytes().unwrap().to_vec();
+                if config.download_covers { write_cover(&path_cover, &bytes).unwrap() }
+                bytes
+            }
+            Err(_) => {
+                panic!("could not download cover")
+            }
+        }
+    } else {
+        if config.debug { println!("Skipping Cover: {}", path_cover) }
+        vec![]
     }
 }
 
@@ -219,7 +266,11 @@ fn main() {
         debug: true,
         audio_fmt: "mp3",
         force: false,
+        download_covers: true,
     };
+
+    let path_cover = format!("{}cover.jpg", out_dir);
+    let cover = get_cover(config, &path_cover, album);
 
     for (track_postion, track) in album.tracks.iter() {
         // println!("{}: {}", id, track.name);
@@ -233,7 +284,7 @@ fn main() {
         let result = download_track(config, &path_out, &track);
 
         match result {
-            Ok(_) => match set_tags(&path_out, &album, track, &track_postion) {
+            Ok(_) => match set_tags(&path_out, &album, track, &track_postion, cover.clone()) {
                 Ok(_) => println!("wrote tags!!"),
                 Err(_) => panic!("could not write tags"),
             },
