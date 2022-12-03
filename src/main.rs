@@ -1,26 +1,23 @@
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::{stdin, stdout, Error, ErrorKind, Read, Write};
-use std::path::Path;
-use std::process::{Command, Output, Stdio};
-use std::str::FromStr;
-use std::{env, path};
-use std::io::BufReader;
 use reqwest;
+use std::collections::HashMap;
+use std::env;
+use std::fs::File;
+use std::io::{Error, ErrorKind, Write};
+use std::process::{Command, Stdio};
 
 use serde::Deserialize;
 use serde_yaml::{self};
 
 use clap::{arg, command, ArgMatches};
 
-use id3::{frame, Tag, TagLike, Timestamp};
+use id3::{frame, Tag, TagLike};
 
 #[derive(Debug, Deserialize)]
 struct Album {
     name: String,
     artist: String,
     genre: String,
-    duration: String,
+    // duration: String,
     released: i32,
     cover: String,
     tracks: HashMap<String, Track>,
@@ -30,6 +27,7 @@ struct Album {
 #[derive(Debug, Deserialize)]
 struct Track {
     name: String,
+    duration: Option<String>,
     artists: Option<Vec<String>>,
     location: Vec<Location>,
     sample: Option<Vec<Sample>>,
@@ -39,6 +37,7 @@ struct Track {
 #[derive(Debug, Deserialize)]
 struct Location {
     url: String,
+    at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,6 +51,7 @@ struct Sample {
 
 struct Config<'a> {
     debug_ytdl: bool,
+    debug_ffmpeg: bool,
     debug: bool,
     audio_fmt: &'a str,
     force: bool,
@@ -76,6 +76,38 @@ fn get_out_dir(matches: &ArgMatches) -> String {
                 .expect("Could not convert the path to a string");
             format!("{}/", dir_current)
         }
+    }
+}
+
+fn extract_track_from_file(
+    config: &Config,
+    path_full: &str,
+    path_out: &str,
+    start: &str,
+    end: Option<String>,
+) -> Result<(), Error> {
+    let mut args: Vec<String> = vec![
+        String::from("-i"),
+        String::from(path_full),
+        String::from("-ss"),
+        String::from(start),
+    ];
+    if let Some(end) = end {
+        args.push(String::from("-to"));
+        args.push(end);
+    }
+    args.push(String::from(path_out));
+    // println!("{:?}", args);
+    let stdout = if config.debug_ffmpeg {
+        Stdio::inherit()
+    } else {
+        Stdio::null()
+    };
+    let result = Command::new("ffmpeg").args(args).stdout(stdout).output();
+
+    match result {
+        Ok(_) => Ok(()),
+        Err(err) => Err(err),
     }
 }
 
@@ -104,7 +136,155 @@ fn download_track_at_location(
     }
 }
 
-fn download_track(config: &Config, path_out: &str, track: &Track) -> Result<(), Error> {
+fn has_full(path_full: &str, files: &mut Vec<String>) -> bool {
+    if files.contains(&path_full.to_string()) {
+        return true;
+    }
+    if std::path::Path::new(&path_full).exists() {
+        files.push(path_full.to_string());
+        return true;
+    }
+    false
+}
+
+/// Returns an integer plus one as a string. 
+
+/// # Examples
+///
+/// Basic usage
+///
+/// ```
+/// let two: Result(String) = get_next_str("1");
+///
+/// assert_eq!("2", two);
+/// ```
+fn get_next_str(pos: &str) -> Result<String, Error> {
+    let pos_int: i8 = pos.parse().unwrap();
+    let pos_int_next = pos_int + 1;
+    Ok(pos_int_next.to_string())
+}
+
+/// Converts a duration string to number of seconds.
+
+/// # Example
+/// 
+/// Basic usage
+/// 
+/// ```
+/// let seconds: Result(String) = duration_seconds_parse("4:20");
+/// 
+/// assert_eq!(300, seconds);
+/// ```
+fn duration_seconds_parse(duration: &str) -> Result<i32, Error> {
+    let parts = duration.split(":");
+    let mut result = 0;
+    let mut idx = 0;
+    for part in parts {
+        let part_parsed: i32 = part.parse().unwrap();
+        result += part_parsed * (60 ^ idx);
+        idx += 1;
+    };
+    Ok(result)
+}
+
+const SECONDS_HOUR: i32 = 60 * 60;
+const SECONDS_MIN: i32 = 60;
+
+/// Converts a number of seconds to a duration string.
+
+/// # Example
+/// 
+/// Basic usage
+/// 
+/// ```
+/// let duration: Result(String) = duration_seconds_format(300);
+/// 
+/// assert_eq!("4:30", duration);
+/// ```
+fn duration_seconds_format(seconds_total: i32) -> Result<String, Error> {
+    println!("{}", seconds_total);
+
+    let mut sec = seconds_total;
+    let hour = sec / SECONDS_HOUR;
+    sec -= hour * SECONDS_HOUR;
+    
+    let min = sec / SECONDS_MIN;
+    sec -= min * SECONDS_MIN;
+
+    println!("{}", format!("{}:{}:{}", hour, min, sec));
+    Ok(String::from("4:20"))
+}
+
+fn get_track_start_time(track: &Track) -> Result<String, Error> {
+    for location in &track.location {
+        if let Some(at) = &location.at {
+            return Ok(at.to_string());
+        }
+    }
+    Err(Error::new(
+        ErrorKind::InvalidData,
+        "Next track has no timestamp",
+    ))
+}
+
+fn get_next_track_time(album: &Album, track_pos_str: &str) -> Result<String, Error> {
+    let next_pos = get_next_str(track_pos_str)?;
+    let track = album.tracks.get(&next_pos);
+    match track {
+        Some(track) => get_track_start_time(track),
+        None => Err(Error::new(
+            ErrorKind::NotFound,
+            format!("No track with pos: {}", next_pos),
+        )),
+    }
+}
+
+fn get_end_time(album: &Album, track: &Track, track_pos_str: &str) -> Result<String, Error> {
+    if let Some(duration) = &track.duration {
+        // FIXME: this math is wrong
+        let start_formatted = get_track_start_time(track)?;
+        let start = duration_seconds_parse(&start_formatted)?;
+        let duration = duration_seconds_parse(duration)?;
+        let end = start + duration;
+        return duration_seconds_format(end)
+    }
+    get_next_track_time(album, track_pos_str)
+}
+
+fn download_full(
+    config: &Config,
+    full_files: &mut Vec<String>,
+    path_full: &str,
+    location: &Location,
+) -> Result<(), Error> {
+    if !has_full(&path_full, full_files) {
+        if config.debug {
+            println!("Downloading full file: {}", path_full)
+        }
+        match download_track_at_location(config, path_full, location) {
+            Ok(_) => {
+                full_files.push(path_full.to_string());
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }
+    } else {
+        if config.debug {
+            println!("Already downloaded full file")
+        }
+        Ok(())
+    }
+}
+
+fn download_track(
+    config: &Config,
+    full_files: &mut Vec<String>,
+    out_dir: &str,
+    path_out: &str,
+    album: &Album,
+    track: &Track,
+    track_pos_str: &str,
+) -> Result<(), Error> {
     let should_download = !std::path::Path::new(path_out).exists() || config.force;
     if !should_download {
         if config.debug {
@@ -113,12 +293,31 @@ fn download_track(config: &Config, path_out: &str, track: &Track) -> Result<(), 
         return Ok(());
     }
     for location in track.location.iter() {
-        match download_track_at_location(config, path_out, location) {
-            Ok(_) => return Ok(()),
-            Err(err) => {
-                println!("Error: URL failed");
-                println!("{}", err);
+        match &location.at {
+            Some(start) => {
+                let path_full = &format!("{}full.mp3", out_dir);
+                match download_full(config, full_files, path_full, location) {
+                    Ok(_) => {
+                        let end = match get_end_time(album, track, track_pos_str) {
+                            Ok(end) => Some(end),
+                            Err(_) => None,
+                        };
+                        return extract_track_from_file(config, path_full, path_out, start, end);
+                    }
+                    Err(err) => {
+                        println!("Error: URL failed");
+                        println!("{}", err);
+                        return Err(err);
+                    }
+                }
             }
+            None => match download_track_at_location(config, path_out, location) {
+                Ok(_) => return Ok(()),
+                Err(err) => {
+                    println!("Error: URL failed");
+                    println!("{}", err);
+                }
+            },
         }
     }
     Result::Err(Error::new(ErrorKind::NotFound, "All locations failed ;("))
@@ -156,7 +355,7 @@ fn set_tags(
     album: &Album,
     track: &Track,
     track_pos_str: &str,
-    cover: Vec<u8>
+    cover: Vec<u8>,
 ) -> Result<(), Error> {
     let track_name = &track.name;
     let album_name = &album.name;
@@ -206,7 +405,7 @@ fn set_tags(
                 text: String::from(lyrics),
             });
         }
-        None => ()
+        None => (),
     };
 
     match tag.write_to_path(path_out, id3::Version::Id3v24) {
@@ -228,13 +427,17 @@ fn get_cover(config: &Config, path_cover: &str, album: &Album) -> Vec<u8> {
     let should_download_cover = !std::path::Path::new(path_cover).exists() || config.force;
     if should_download_cover {
         let cover_url = &album.cover;
-        if config.debug { println!("downloading cover") }
+        if config.debug {
+            println!("downloading cover")
+        }
         let resp = reqwest::blocking::get(cover_url);
 
         match resp {
             Ok(response) => {
                 let bytes = response.bytes().unwrap().to_vec();
-                if config.download_covers { write_cover(&path_cover, &bytes).unwrap() }
+                if config.download_covers {
+                    write_cover(&path_cover, &bytes).unwrap()
+                }
                 bytes
             }
             Err(_) => {
@@ -242,7 +445,9 @@ fn get_cover(config: &Config, path_cover: &str, album: &Album) -> Vec<u8> {
             }
         }
     } else {
-        if config.debug { println!("Skipping Cover: {}", path_cover) }
+        if config.debug {
+            println!("Skipping Cover: {}", path_cover)
+        }
         vec![]
     }
 }
@@ -263,6 +468,7 @@ fn main() {
     let album = &read_file(file_path);
     let config = &Config {
         debug_ytdl: true,
+        debug_ffmpeg: true,
         debug: true,
         audio_fmt: "mp3",
         force: false,
@@ -272,8 +478,10 @@ fn main() {
     let path_cover = format!("{}cover.jpg", out_dir);
     let cover = get_cover(config, &path_cover, album);
 
+    let mut full_files = vec![];
+
     for (track_postion, track) in album.tracks.iter() {
-        // println!("{}: {}", id, track.name);
+        println!("{}: {}", track_postion, track.name);
 
         let track_name = &track.name;
         let path_out = &format!(
@@ -281,7 +489,15 @@ fn main() {
             out_dir, track_postion, track_name, config.audio_fmt
         );
 
-        let result = download_track(config, &path_out, &track);
+        let result = download_track(
+            config,
+            &mut full_files,
+            &out_dir,
+            &path_out,
+            &album,
+            &track,
+            &track_postion,
+        );
 
         match result {
             Ok(_) => match set_tags(&path_out, &album, track, &track_postion, cover.clone()) {
