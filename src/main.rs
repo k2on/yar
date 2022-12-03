@@ -1,62 +1,17 @@
 use reqwest;
-use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::io::{Error, ErrorKind, Write};
 use std::process::{Command, Stdio};
+use yar::{
+    duration_seconds_format, duration_seconds_parse, get_next_str, get_track_title, Album, Config,
+    Location, Sample, Track,
+};
 
-use serde::Deserialize;
-use serde_yaml::{self};
 
 use clap::{arg, command, ArgMatches};
 
 use id3::{frame, Tag, TagLike};
-
-#[derive(Debug, Deserialize)]
-struct Album {
-    name: String,
-    artist: String,
-    genre: String,
-    // duration: String,
-    released: i32,
-    cover: String,
-    tracks: HashMap<String, Track>,
-    track_count: i8,
-}
-
-#[derive(Debug, Deserialize)]
-struct Track {
-    name: String,
-    duration: Option<String>,
-    artists: Option<Vec<String>>,
-    location: Vec<Location>,
-    sample: Option<Vec<Sample>>,
-    lyrics: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Location {
-    url: String,
-    at: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Sample {
-    artist: String,
-    name: String,
-    r#type: String,
-    // from: Option<String>,
-    // to: Option<String>,
-}
-
-struct Config<'a> {
-    debug_ytdl: bool,
-    debug_ffmpeg: bool,
-    debug: bool,
-    audio_fmt: &'a str,
-    force: bool,
-    download_covers: bool,
-}
 
 fn read_file(path: String) -> Album {
     let f = std::fs::File::open(path).expect("Could not open file");
@@ -89,6 +44,9 @@ fn extract_track_from_file(
     let mut args: Vec<String> = vec![
         String::from("-i"),
         String::from(path_full),
+        String::from("-vn"),
+        String::from("-c:a"),
+        String::from("copy"),
         String::from("-ss"),
         String::from(start),
     ];
@@ -147,74 +105,6 @@ fn has_full(path_full: &str, files: &mut Vec<String>) -> bool {
     false
 }
 
-/// Returns an integer plus one as a string. 
-
-/// # Examples
-///
-/// Basic usage
-///
-/// ```
-/// let two: Result(String) = get_next_str("1");
-///
-/// assert_eq!("2", two);
-/// ```
-fn get_next_str(pos: &str) -> Result<String, Error> {
-    let pos_int: i8 = pos.parse().unwrap();
-    let pos_int_next = pos_int + 1;
-    Ok(pos_int_next.to_string())
-}
-
-/// Converts a duration string to number of seconds.
-
-/// # Example
-/// 
-/// Basic usage
-/// 
-/// ```
-/// let seconds: Result(String) = duration_seconds_parse("4:20");
-/// 
-/// assert_eq!(300, seconds);
-/// ```
-fn duration_seconds_parse(duration: &str) -> Result<i32, Error> {
-    let parts = duration.split(":");
-    let mut result = 0;
-    let mut idx = 0;
-    for part in parts {
-        let part_parsed: i32 = part.parse().unwrap();
-        result += part_parsed * (60 ^ idx);
-        idx += 1;
-    };
-    Ok(result)
-}
-
-const SECONDS_HOUR: i32 = 60 * 60;
-const SECONDS_MIN: i32 = 60;
-
-/// Converts a number of seconds to a duration string.
-
-/// # Example
-/// 
-/// Basic usage
-/// 
-/// ```
-/// let duration: Result(String) = duration_seconds_format(300);
-/// 
-/// assert_eq!("4:30", duration);
-/// ```
-fn duration_seconds_format(seconds_total: i32) -> Result<String, Error> {
-    println!("{}", seconds_total);
-
-    let mut sec = seconds_total;
-    let hour = sec / SECONDS_HOUR;
-    sec -= hour * SECONDS_HOUR;
-    
-    let min = sec / SECONDS_MIN;
-    sec -= min * SECONDS_MIN;
-
-    println!("{}", format!("{}:{}:{}", hour, min, sec));
-    Ok(String::from("4:20"))
-}
-
 fn get_track_start_time(track: &Track) -> Result<String, Error> {
     for location in &track.location {
         if let Some(at) = &location.at {
@@ -246,7 +136,7 @@ fn get_end_time(album: &Album, track: &Track, track_pos_str: &str) -> Result<Str
         let start = duration_seconds_parse(&start_formatted)?;
         let duration = duration_seconds_parse(duration)?;
         let end = start + duration;
-        return duration_seconds_format(end)
+        return duration_seconds_format(end);
     }
     get_next_track_time(album, track_pos_str)
 }
@@ -357,7 +247,7 @@ fn set_tags(
     track_pos_str: &str,
     cover: Vec<u8>,
 ) -> Result<(), Error> {
-    let track_name = &track.name;
+    let track_name = get_track_title(track);
     let album_name = &album.name;
     let album_artist = &album.artist;
     let album_track_count: u32 = album.track_count.try_into().unwrap();
