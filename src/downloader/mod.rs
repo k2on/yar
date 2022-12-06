@@ -4,12 +4,10 @@ use util::{get_end_time, has_full};
 mod splitter;
 use splitter::split_track;
 
-use yar::{get_stdout, Config, Location, Album, Track};
 use std::fs::File;
-use std::io::{Write, Error, ErrorKind};
+use std::io::{Error, ErrorKind, Write};
 use std::process::Command;
-
-
+use crate::{get_stdout, Album, Config, Location, Track};
 
 pub fn download_track(
     config: &Config,
@@ -82,7 +80,6 @@ fn download_full(
         Ok(())
     }
 }
-
 
 fn download_track_at_location(
     config: &Config,

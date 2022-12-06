@@ -1,7 +1,8 @@
-use std::io::{Error, ErrorKind};
 use id3::{frame, Tag, TagLike};
+use std::io::{Error, ErrorKind};
 
-use yar::{Album, Track, Sample, get_track_title};
+use crate::{Album, Track, Sample, get_track_title};
+
 
 pub fn tag_track(
     path_out: &str,

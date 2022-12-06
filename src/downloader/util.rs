@@ -1,6 +1,6 @@
 use std::io::{Error, ErrorKind};
 
-use yar::{Album, Track};
+use crate::{Album, Track};
 
 const DELIMITER_DURATION: &str = ":";
 
@@ -120,6 +120,3 @@ fn get_track_start_time(track: &Track) -> Result<String, Error> {
         "Next track has no timestamp",
     ))
 }
-
-
-

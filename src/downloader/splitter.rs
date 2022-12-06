@@ -1,6 +1,6 @@
-use yar::{get_stdout, Config};
-use std::process::Command;
 use std::io::Error;
+use std::process::Command;
+use crate::{get_stdout, Config};
 
 pub fn split_track(
     config: &Config,
@@ -11,17 +11,19 @@ pub fn split_track(
 ) -> Result<(), Error> {
     let args = get_ffmpeg_args(path_full, start, end, path_out);
     let stdout = get_stdout(config.debug_ffmpeg);
-    let result = Command::new("ffmpeg")
-        .args(args)
-        .stdout(stdout)
-        .output();
+    let result = Command::new("ffmpeg").args(args).stdout(stdout).output();
     match result {
         Ok(_) => Ok(()),
         Err(err) => Err(err),
     }
 }
 
-fn get_ffmpeg_args(path_full: &str, start: &str, end: Option<String>, path_out: &str) -> Vec<String> {
+fn get_ffmpeg_args(
+    path_full: &str,
+    start: &str,
+    end: Option<String>,
+    path_out: &str,
+) -> Vec<String> {
     let mut args: Vec<String> = vec![
         String::from("-i"),
         String::from(path_full),
