@@ -1,48 +1,62 @@
 mod tagger;
 mod downloader;
 
-use std::{collections::HashMap, process::Stdio, fs::{create_dir_all, remove_file}, io::Error};
+use std::{collections::HashMap, process::Stdio, fs::{create_dir_all, remove_file}, io::Error, path::Path, fmt::Write};
 use downloader::{download_track, get_cover};
 use tagger::tag_track;
+use chrono::{NaiveDate, Duration};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize, de::Visitor};
 
-#[derive(Debug, Deserialize)]
+const SECONDS_HOUR: i32 = 60 * 60;
+const SECONDS_MIN: i32 = 60;
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Library {
     pub albums: Vec<Album>,
 }
 
-#[derive(Debug, Deserialize)]
+impl Library {
+    pub fn new() -> Self { Library { albums: vec![] } } 
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Album {
     pub name: String,
     pub artist: String,
     pub genre: String,
     // pub duration: String,
-    pub released: i32,
+    pub released: NaiveDate,
     pub cover: String,
     pub tracks: HashMap<String, Track>,
     pub track_count: i8,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Track {
     pub name: String,
     pub duration: Option<String>,
-    pub artists: Option<Vec<String>>,
-    pub remix: Option<String>,
-    pub artist_cover: Option<String>,
+    pub artists: Option<Vec<TrackArtist>>,
+    pub artist: Option<String>,
     pub location: Vec<Location>,
     pub sample: Option<Vec<Sample>>,
     pub lyrics: Option<String>,
+    pub wave: Option<Wave>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TrackArtist {
+    pub id: String,
+    pub r#for: Option<String>,
+}
+
+#[derive(Debug, Clone ,Deserialize, Serialize)]
 pub struct Location {
     pub url: String,
     pub at: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Sample {
     pub artist: String,
     pub name: String,
@@ -59,6 +73,75 @@ pub struct Config<'a> {
     pub force: bool,
     pub download_covers: bool,
     pub keep_full_files: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct Wave {
+    pub length: i32,
+    pub points: Vec<u8>,
+}
+
+struct VisitorWave;
+
+impl<'de> Visitor<'de> for VisitorWave {
+    type Value = Wave;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("expected a string")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error, {
+        let input = v;
+        let points = base64::decode(input).unwrap();
+        let length = points.len().try_into().unwrap();
+        Ok(Wave {
+            length,
+            points,
+        })
+        
+    }
+}
+
+impl<'de> Deserialize<'de> for Wave {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de> {
+        deserializer.deserialize_str(VisitorWave)
+    }
+}
+
+impl Serialize for Wave {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer {
+        let serialized = base64::encode(&self.points);
+        serializer.serialize_str(&serialized)
+    }
+}
+
+/// Converts a number of seconds to a duration string.
+
+/// # Example
+///
+/// Basic usage
+///
+/// ```
+/// let duration = yar::duration_seconds_format(260);
+///
+/// assert!(!duration.is_err());
+/// assert_eq!(duration.unwrap(), "0:4:20");
+/// ```
+pub fn duration_seconds_format(seconds_total: i32) -> Result<String, Error> {
+    let mut sec = seconds_total;
+    let hour = sec / SECONDS_HOUR;
+    sec -= hour * SECONDS_HOUR;
+
+    let min = sec / SECONDS_MIN;
+    sec -= min * SECONDS_MIN;
+
+    Ok(format!("{}:{}:{}", hour, min, sec))
 }
 
 /// Creates a string representing the title of the track.
@@ -83,18 +166,18 @@ pub struct Config<'a> {
 /// ```
 pub fn get_track_title(track: &Track) -> String {
     let name = &track.name;
-    let remix = if let Some(artist) = &track.remix {
-        format!(" ({} Remix)", artist)
-    } else {
-        String::new()
-    };
-    let cover = if let Some(artist) = &track.artist_cover {
-        format!(" ({} Cover)", artist)
-    } else {
-        String::new()
-    };
+    // let remix = if let Some(artist) = &track.remix {
+    //     format!(" ({} Remix)", artist)
+    // } else {
+    //     String::new()
+    // };
+    // let cover = if let Some(artist) = &track.artist_cover {
+    //     format!(" ({} Cover)", artist)
+    // } else {
+    //     String::new()
+    // };
 
-    format!("{}{}{}", name, remix, cover)
+    format!("{}", name)
 }
 
 pub fn get_stdout(debug: bool) -> Stdio {
@@ -121,8 +204,10 @@ pub fn get_stdout(debug: bool) -> Stdio {
 /// assert_eq!(path, "./library/my-artist/album-name/");
 /// ```
 pub fn get_path_album(path_library: &str, album: &Album) -> String {
-    let path_artist = parse_name(&album.artist);
-    let album_dir_name = parse_name(&album.name);
+    let path_artist = &parse_name(&album.artist);
+    let album_dir_name = &parse_name(&album.name);
+    // let paths = [path_library, Path::new(path_artist), Path::new(album_dir_name)];
+    // join_paths(paths)
     format!("{}{}/{}/", path_library, path_artist, album_dir_name)
 }
 
@@ -134,13 +219,14 @@ pub fn get_path_album(path_library: &str, album: &Album) -> String {
 ///
 /// # Example
 /// ```
-/// let name = yar::parse_name("Don't Play With The Gang");
-/// assert_eq!(name, "dont-play-with-the-gang");
+/// let name = yar::parse_name("Don't Play & The Gang");
+/// assert_eq!(name, "dont-play-and-the-gang");
 /// ```
 pub fn parse_name(name: &str) -> String {
     let is_space = |c: char| c == ' ';
-    let is_special = |c: char| !c.is_ascii_alphanumeric() && !is_space(c);
+    let is_special = |c: char| c != '-' && !c.is_ascii_alphanumeric() && !is_space(c);
     name.to_lowercase()
+        .replace(" & ", " and ")
         .replace(is_special, "")
         .replace(is_space, "-")
 }

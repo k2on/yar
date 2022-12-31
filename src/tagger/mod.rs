@@ -1,3 +1,4 @@
+use chrono::Datelike;
 use id3::{frame, Tag, TagLike};
 use std::io::{Error, ErrorKind};
 
@@ -17,7 +18,7 @@ pub fn tag_track(
     let album_track_count: u32 = album.track_count.try_into().unwrap();
     let track_pos: u32 = track_pos_str.parse().unwrap();
     let genre = &album.genre;
-    let year = album.released;
+    let year = album.released.year();
     let lyrics = &track.lyrics;
     let comment = make_comment(track);
     let artist = make_artist(album, track);
@@ -93,7 +94,11 @@ fn make_comment(track: &Track) -> String {
 // Still not sure how to do this, so this will just join the arist names
 fn make_artist(album: &Album, track: &Track) -> String {
     match &track.artists {
-        Some(artists) => artists.join(", "),
+        Some(artists) => artists
+            .iter()
+            .map(|artist| artist.id.clone())
+            .collect::<Vec<String>>()
+            .join(", "),
         None => album.artist.to_string(),
     }
 }

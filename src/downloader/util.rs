@@ -1,11 +1,8 @@
 use std::io::{Error, ErrorKind};
 
-use crate::{Album, Track};
+use crate::{duration_seconds_format, Album, Track};
 
 const DELIMITER_DURATION: &str = ":";
-
-const SECONDS_HOUR: i32 = 60 * 60;
-const SECONDS_MIN: i32 = 60;
 
 pub fn has_full(path_full: &str, files: &mut Vec<String>) -> bool {
     if files.contains(&path_full.to_string()) {
@@ -72,29 +69,6 @@ fn duration_seconds_parse(duration: &str) -> Result<i32, Error> {
         idx += 1;
     }
     Ok(result)
-}
-
-/// Converts a number of seconds to a duration string.
-
-/// # Example
-///
-/// Basic usage
-///
-/// ```
-/// let duration = yar::duration_seconds_format(260);
-///
-/// assert!(!duration.is_err());
-/// assert_eq!(duration.unwrap(), "0:4:20");
-/// ```
-fn duration_seconds_format(seconds_total: i32) -> Result<String, Error> {
-    let mut sec = seconds_total;
-    let hour = sec / SECONDS_HOUR;
-    sec -= hour * SECONDS_HOUR;
-
-    let min = sec / SECONDS_MIN;
-    sec -= min * SECONDS_MIN;
-
-    Ok(format!("{}:{}:{}", hour, min, sec))
 }
 
 fn get_next_track_time(album: &Album, track_pos_str: &str) -> Result<String, Error> {
