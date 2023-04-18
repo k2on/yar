@@ -102,7 +102,7 @@ fn get_downloader_args(url: &str, audio_fmt: &str, path_out: &str) -> Vec<String
     vec![
         String::from("-x"),
         String::from(url),
-        String::from("--audio-format"),
+        String::from("-f"),
         String::from(audio_fmt),
         String::from("--output"),
         String::from(path_out),
