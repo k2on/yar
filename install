@@ -3,4 +3,5 @@
 cargo build
 cp ./target/debug/yarb /usr/local/bin/
 cp ./target/debug/yarcamp /usr/local/bin/
+cp ./target/debug/find_artist_id /usr/local/bin/
 cp ./target/debug/yar /usr/local/bin/
