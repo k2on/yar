@@ -320,7 +320,10 @@ fn process_library_album_track(
     match result {
         Ok(_) => match tag_track(&path_out, &album, track, &track_position, cover.clone()) {
             Ok(_) => println!("wrote tags!!"),
-            Err(_) => panic!("could not write tags"),
+            Err(err) => {
+                println!("{:?}", err);
+                panic!("could not write tags to {}", path_out);
+            }
         },
         Err(_) => (),
     }

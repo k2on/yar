@@ -88,7 +88,7 @@ fn download_track_at_location(
 ) -> Result<(), Error> {
     let args = get_downloader_args(&location.url, config.audio_fmt, path_out);
     let stdout = get_stdout(config.debug_ytdl);
-    let result = Command::new("youtube-dl")
+    let result = Command::new("yt-dlp")
         .args(args)
         .stdout(stdout)
         .output();
