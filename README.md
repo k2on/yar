@@ -29,7 +29,7 @@ sudo ./mk-sync
 
 Create a folder in /Users/jon/.music/artists called "backwhen"
 
-Download [this file](https://raw.githubusercontent.com/phonkhub/db/main/artists/backwhen/sensations.yml) into that folder
+Download [this file](https://raw.githubusercontent.com/phonkhub/db/main/artists/backwhen/sensations.yml) into that folder, called "sensations.yml"
 
 3. Go back to terminal and run `tunesync`
 
