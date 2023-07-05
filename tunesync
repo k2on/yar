@@ -1,0 +1,8 @@
+#!/bin/sh
+
+path_src=~/.music/
+path_out=${path_src}out.yml
+path_lib=~/media/music/
+
+yarb -i $path_src > $path_out
+yar -f $path_out -d $path_lib
