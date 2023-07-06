@@ -18,6 +18,7 @@ Builds a album file from a bandcamp or soundcloud url.
 1. Run these commands
 
 ```sh
+brew install yt-dlp
 brew install rust
 git clone https://github.com/k2on/yar
 cd yar
